@@ -1,8 +1,8 @@
-# すいっとトーク（suitto-talk）  
+# すいっとトーク（suitto-talk）v1  
 
 **Ollamaを使った軽量GUIチャットアプリ**  
 本リポジトリでは、アプリの **ソースコード** を公開しています。  
-
+マニュアルは[こちら](./README_PLAY.md)  
 ※ 本アプリはローカル環境で動作する [Ollama API](http://localhost:11434) を前提としています。  
 ※ 本ソフトウェアは、既存の商標・サービスとは関係ありません。  
 
@@ -96,7 +96,6 @@ Ollamaは、PC上で軽量な大規模言語モデル（LLM）を動作させる
 https://ollama.com/
 
 ### モデルのダウンロード
-本アプリでは以下のモデルを使用しています。：
 
 ```bash
 ollama pull gemma3:1b
@@ -112,8 +111,7 @@ ollama pull gemma3:1b
 - 応答速度が速い
 - シンプルな対話用途に適している
 
-GemmaはGoogleが提供する軽量LLMであり、
-「Gemma Terms of Use」に基づいて利用されています。
+GemmaはGoogleが提供する軽量LLMであり「Gemma Terms of Use」に基づいて利用されています。
 
 詳細：
 https://ai.google.dev/gemma/terms
