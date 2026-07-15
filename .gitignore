@@ -7,11 +7,17 @@ __pycache__/
 venv/
 .venv/
 env/
-.env/
+
+# 環境変数・秘密情報
+.env
+.env.*
+!.env.example
 
 # 一時ファイル・ログ
 *.tmp
 *.log
+voice_cache/
+logs/
 
 # OS / エディタ関連
 .DS_Store
@@ -19,11 +25,14 @@ Thumbs.db
 .vscode/
 .idea/
 
-# PyInstaller ビルド成果物（exe など）
+# PyInstaller ビルド成果物
 dist/
 build/
 *.spec
 
-# もし今後追加で「GitHubに上げたくないフォルダ」ができたらここに追記
+# 開発途中・実験用コード
+experiments/
+
+# 必要に応じて追加
 # screenshots/
 # work_in_progress/
