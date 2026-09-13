@@ -2,7 +2,7 @@
 
 **Ollama + VOICEVOX に対応したローカル AI チャットアプリ**
 
-[最新版を GitHub Releases からダウンロード](https://github.com/AglaoDev-jp/suitto-talk/releases)
+[最新版を GitHub Releases からダウンロード](https://github.com/AglaoDev-jp/tsuzuri-danwashitsu/releases/tag/v1.0.0)
 
 本アプリは、ローカル環境で動作する LLM（大規模言語モデル）と会話できる GUI チャットアプリです。  
 `profiles.json` に登録されたキャラクターや用途別プロンプトを切り替えながら、AI との会話を楽しめます。
