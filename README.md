@@ -2,7 +2,7 @@
 
 **Ollama + VOICEVOX に対応したローカル AI チャットアプリ**
 
-[実行ファイル版を GitHub Releases からダウンロード](https://github.com/AglaoDev-jp/suitto-talk/releases)
+[実行ファイル版を GitHub Releases からダウンロード](https://github.com/AglaoDev-jp/tsuzuri-danwashitsu/releases/tag/v1.0.0)
 
 本作は、これまで制作していたアプリの内容と方向性を引き継ぎ、**「綴り談話室（つづりだんわしつ）」** へ名称を変更したものです。
 名称変更後、最初に公開するバージョンを **v1** としています。
