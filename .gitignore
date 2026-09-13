@@ -3,23 +3,34 @@ __pycache__/
 *.py[cod]
 *.pyo
 
-# 仮想環境
+# 型チェック
+.mypy_cache/
+
+# テスト・静的解析
+.pytest_cache/
+.ruff_cache/
+
+# カバレッジ
+.coverage
+htmlcov/
+
+# 仮想環境・環境変数
 venv/
 .venv/
 env/
-
-# 環境変数・秘密情報
-.env
-.env.*
-!.env.example
+.env/
 
 # 一時ファイル・ログ
 *.tmp
 *.log
-voice_cache/
-logs/
+.cache/
 
-# OS / エディタ関連
+# 綴り談話室の実行時生成物
+logs/
+voice_cache/
+user_settings.json
+
+# OS・エディタ関連
 .DS_Store
 Thumbs.db
 .vscode/
@@ -30,9 +41,6 @@ dist/
 build/
 *.spec
 
-# 開発途中・実験用コード
-experiments/
-
-# 必要に応じて追加
+# 必要になればここへ追加
 # screenshots/
 # work_in_progress/

@@ -1,10 +1,33 @@
-# すいっとトーク（suitto-talk）v2
+# 綴り談話室 v1
 
 **Ollama + VOICEVOX に対応したローカル AI チャットアプリ**
 
-本リポジトリでは、アプリケーションのソースコードを公開しています。  
-操作方法については、[利用マニュアル](./README_PLAY.md)をご確認ください。  
->本READMEは、アプリのソースコードおよび仕様をもとに、OpenAIの対話型AI「ChatGPT」の支援を受けて草案を作成し、作者が内容の確認・編集を行っています。  
+[実行ファイル版を GitHub Releases からダウンロード](https://github.com/AglaoDev-jp/suitto-talk/releases)
+
+本作は、これまで制作していたアプリの内容と方向性を引き継ぎ、**「綴り談話室（つづりだんわしつ）」** へ名称を変更したものです。
+名称変更後、最初に公開するバージョンを **v1** としています。
+
+
+本リポジトリでは、ソースコードと開発者向け情報を公開しています。  
+実行ファイル版の詳しい使い方は、[利用マニュアル](./README_PLAY.md)をご確認ください。
+
+> [!NOTE]
+> 本 README は、アプリのソースコードおよび仕様をもとに、OpenAI の対話型 AI「ChatGPT」の支援を受けて草案を作成し、作者が内容の確認・編集を行っています。
+
+---
+
+## 目次
+
+- [主な機能](#主な機能)
+- [動作環境](#動作環境)
+- [実行ファイル版から起動する](#実行ファイル版から起動する)
+- [ソースコードから起動する](#ソースコードから起動する)
+- [PyInstaller によるビルド](#pyinstaller-によるビルド)
+- [プロジェクト構成](#プロジェクト構成)
+- [技術情報](#技術情報)
+- [既知の制限事項](#既知の制限事項)
+- [開発について](#開発について)
+- [ライセンス](#ライセンス)
 
 ---
 
@@ -15,6 +38,12 @@
 - Ollama にインストールされているモデル一覧の自動取得・更新
 - Thinking モードの切り替え（対応モデルのみ）
 - AI 応答のストリーミング表示
+- ユーザーが誤入力できない表示専用のチャット欄
+- AI 返答中の設定変更・クリア・保存をロックし、会話履歴の混線を防止
+- `profiles.json` の読込失敗時に、原因を警告して臨時プロフィールで起動
+- キャラクターごとのアバター切り替えと、安全なデフォルト画像へのフォールバック
+- AI アバター表示／非表示の切り替えと設定保存
+- AI の待機状態と返答の感情に応じた表情切り替え
 - VOICEVOX による応答生成中からの順次読み上げ
 - VOICEVOX の話者 ID 切り替え
 - 読み上げの途中停止
@@ -26,380 +55,436 @@
 
 ## 動作環境
 
-本アプリでは、以下のソフトウェアを使用します。
+### 実行時に必要なソフトウェア
 
-- **Python 3.8 以上**
 - **Ollama**（必須）
   - AI チャット機能に使用します。
+- **Ollama 対応モデル**（必須）
+  - 使用するモデルを事前にダウンロードしてください。
 - **VOICEVOX**（任意）
   - AI 応答の音声読み上げに使用します。
 
 VOICEVOX を起動していない場合でも、チャット機能は利用できます。  
-その場合、音声読み上げは実行されず、チャット画面に警告メッセージが表示されます。
-
 本アプリは、ローカル環境で動作する **Ollama API** および **VOICEVOX ENGINE** を利用します。
+
+### ソースコードから起動・ビルドする場合
+
+- Windows
+- Python 3.8 以上
+- `requests`
+- `pygame`
+- PyInstaller（実行ファイルを作成する場合のみ）
+
+`tkinter` は通常、Windows 版 Python に同梱されています。
 
 > [!NOTE]
 > 本ソフトウェアは、同名または類似名称の既存の商標・製品・サービスとは関係ありません。
 
 ---
 
-## 開発について
+## 実行ファイル版から起動する
 
-本プロジェクトの制作にあたり、OpenAI の対話型 AI「ChatGPT」のサポートを受け、アイデア出し、コード設計、実装、検証、文章表現の改善などを行いました。
+1. [GitHub Releases](https://github.com/AglaoDev-jp/suitto-talk/releases) から配布 ZIP をダウンロードします。
+2. ZIP を任意のフォルダへ展開します。
+3. Ollama を起動し、使用するモデルがインストールされていることを確認します。
+4. 音声読み上げを使用する場合は、VOICEVOX も起動します。
+5. 展開したフォルダ内の `綴り談話室.exe` をダブルクリックします。
 
-使用した主なモデル・プランは以下のとおりです。
+実行ファイル版では、Python や Python ライブラリを別途インストールする必要はありません。  
+ただし、Ollama、使用するモデル、必要に応じて VOICEVOX は利用者自身で用意してください。
 
-- GPT-5.5
-- GPT-5.6
-（ChatGPT Plus）  
+> [!IMPORTANT]
+> ZIP 内から直接起動せず、必ず展開してから使用してください。  
+> また、`綴り談話室.exe` だけを別の場所へ移動せず、配布フォルダの構成を保ってください。
 
-開発に携わったすべての研究者、開発者、関係者の皆様に、心より感謝申し上げます。
-
----
-
-## 制作期間
-
-- **v1:** 2026年5月4日～5月5日、2026年5月7日  
-  AI 利用上の注意表示と安全ガイドを追加
-- **v2:** 2026年6月19日、2026年7月15日
+詳しい準備、操作方法、トラブル対処は [README_PLAY.md](./README_PLAY.md) に記載しています。
 
 ---
 
-## コントリビューションについて
+## ソースコードから起動する
 
-※ 本リポジトリは個人学習・個人制作を目的としています。  
-そのため、Pull Request（PR）はお受けできません。ご了承ください。
-
----
-
-## 必要なPythonライブラリ
-
-以下の外部ライブラリをインストールしてください。
-
-```bash
-pip install requests pygame
-```
-
-`tkinter` は Python の標準 GUI ライブラリです。  
-環境によっては、Python とは別に Tcl/Tk 関連パッケージの導入が必要になる場合があります。
-
----
-
-## 起動前の準備
-
-### 1. Ollama のインストール
-
-Ollama 公式サイトからインストールしてください。
+### 1. Ollama をインストールする
 
 - [Ollama 公式サイト](https://ollama.com/)
 
-### 2. 使用するモデルのダウンロード
-
-例として、以下のようにモデルをダウンロードできます。
+使用するモデルをダウンロードします。
 
 ```bash
 ollama pull gemma4:e2b
 ```
 
-```bash
-ollama pull qwen3
-```
-
-```bash
-ollama pull llama3.2
-```
-
 上記以外の Ollama 対応モデルも利用できます。
 
-### 3. VOICEVOX のインストール（読み上げ機能を使用する場合）
+### 2. VOICEVOX をインストールする（任意）
 
 - [VOICEVOX 公式サイト](https://voicevox.hiroshiba.jp/)
 - [VOICEVOX GitHub](https://github.com/VOICEVOX/voicevox)
 
-本アプリに VOICEVOX 本体は含まれていません。  
-音声読み上げを使用する場合は、利用者自身で VOICEVOX をインストールし、起動した状態で本アプリをご利用ください。
+本アプリに VOICEVOX 本体は含まれていません。
 
-### 4. 必要なファイルの配置
-
-少なくとも、以下のファイルを同じフォルダに配置してください。
-
-```text
-suitto-talk/
-├─ main_script_v2.py
-└─ profiles.json
-```
-
-実行時には、同じフォルダ内に以下のディレクトリが自動作成されます。
-
-```text
-logs/         # チャットログの保存先
-voice_cache/  # VOICEVOXの一時音声ファイル
-```
-
-### 5. アプリの起動
+### 3. Python ライブラリをインストールする
 
 ```bash
-python main_script_v2.py
+py -m pip install requests pygame
 ```
 
----
+### 4. アプリを起動する
 
-## 使用モデルについて
+コマンドプロンプトで `src` フォルダへ移動し、次を実行します。
 
-本アプリは起動時に Ollama の `/api/tags` へ接続し、ローカル環境にインストールされているモデル一覧を取得します。  
-取得したモデルは、GUI のモデル選択欄から切り替えられます。
+```bash
+py main.py
+```
 
-### 初期選択されるモデル
+`py` コマンドを使用できない環境では、`python` に置き換えてください。
 
-- `gemma4:e2b` がインストールされている場合は、初期モデルとして選択されます。
-- `gemma4:e2b` が見つからない場合は、取得できたモデル一覧の先頭が選択されます。
-
-### モデル一覧を取得できなかった場合
-
-Ollama が起動していない場合や、モデル一覧の取得に失敗した場合は、以下の予備モデル一覧（Fallback Models）が表示されます。
-
-- `gemma4:e2b`
-- `gemma4`
-- `qwen3`
-- `llama3.2`
-
-> [!IMPORTANT]
-> 予備モデル一覧は、モデル一覧の取得に失敗した場合に表示する候補です。  
-> 各モデルが実際にインストールされていることを保証するものではありません。
-
-Ollama の起動後に GUI の「モデル更新」ボタンを押すと、現在インストールされているモデル一覧を再取得できます。
+Pythonから直接実行した場合は、`main.py` のある `src` フォルダが基準です。
+`profiles.json` と `assets` をここから読み込み、設定・ログ・一時音声もここへ保存します。
+別の作業フォルダから `main.py` のパスを指定して起動しても、この基準は変わりません。
 
 ---
 
-## Thinking モードについて
+## PyInstaller によるビルド
 
-GUI の「Thinking」チェックボックスを切り替えると、Ollama API に `think: true` または `think: false` を送信します。
+以下は、Windows 上で配布用の実行ファイル一式を作成する手順です。  
+`profiles.json` の編集、アバター画像の差し替え、チャットログの保存を維持するため、本プロジェクトでは **1ファイル化ではなくフォルダ形式（`--onedir`）** を使用します。
 
-Thinking モードの対応状況や動作は、使用するモデルおよび Ollama のバージョンによって異なります。  
-非対応モデルでは、期待どおりに動作しない可能性があります。
+### 1. PyInstaller をインストールする
 
-本アプリでは、Thinking の内部内容は表示せず、通常の回答本文のみをチャット画面に表示します。
+```bash
+py -m pip install "pyinstaller>=6,<7"
+```
+※ こちらは、"PyInstaller 6.x 系の最新版をインストールする。ただし将来の PyInstaller 7.x には上げない。"というコマンドです。  
+**「このビルド手順はPyInstaller 6系を前提にしています」**  
+
+
+### 2. `src` フォルダへ移動する
+
+```bat
+cd src
+```
+
+### 3. ビルドする
+
+Windows のコマンドプロンプトで、次を実行します。  
+再ビルドする場合は、既存の `dist\綴り談話室` を先に別の場所へ退避してください。  
+編集したキャラクター設定・画像や、動作確認中に保存した設定・ログを残せます。  
+
+```bat
+py -m PyInstaller ^
+  --clean ^
+  --windowed ^
+  --onedir ^
+  --name "綴り談話室" ^
+  --icon "icon.ico" ^
+  main.py ^
+&& copy /Y "profiles.json" "dist\綴り談話室\profiles.json" ^
+&& xcopy /E /I /Y "assets" "dist\綴り談話室\assets"
+```
+
+ビルドに成功すると、次のフォルダが作成されます。  
+
+```text
+src\dist\綴り談話室\
+```
+
+ビルドに成功すると、`綴り談話室.exe` と、Pythonランタイム・DLLなどをまとめた
+`_internal` フォルダが作成され、続けて `profiles.json` と `assets` がexeの隣へ自動でコピーされます。
+
+`&&` でコマンドをつないでいるため、PyInstaller のビルドに失敗した場合はコピー処理へ進みません。  
+`profiles.json` と `assets` は利用者が編集・差し替えできるよう、`--add-data` で `_internal` に取り込まず、exeの隣へ配置します。specファイルの編集は不要です。  
+
+### 4. マニュアル・ライセンスを配置する
+
+**ビルドが正常に完了したことを確認してから**、`src` フォルダにいる状態で次を実行します。
+
+```bat
+copy /Y "..\README_PLAY.md" "dist\綴り談話室\README_PLAY.md"
+xcopy /E /I /Y "..\licenses" "dist\綴り談話室\licenses"
+```
+
+ソース側の `user_settings.json`・`logs`・`voice_cache` はコピーしません。これらは実行時に必要に応じて作成されます。
+
+```text
+dist\綴り談話室\
+├─ 綴り談話室.exe
+├─ profiles.json
+├─ assets/
+├─ README_PLAY.md
+├─ licenses/
+├─ _internal/          # Pythonランタイム・DLLなど（削除しない）
+├─ user_settings.json  # 設定保存時に自動作成
+├─ logs/               # 起動時に自動作成
+└─ voice_cache/        # 起動時に自動作成
+```
+
+exe版では **exeのあるフォルダ** が利用者向けファイルの基準です。
+`_internal` の中に設定・画像・ログ・音声を置く必要はありません。
+書き込み可能な場所へフォルダごと展開し、exeと `_internal` は一緒に保管してください。
+
+| 起動方法 | 基準フォルダ | 読み込み・保存先 |
+| --- | --- | --- |
+| `py main.py` | `Path(__file__).resolve().parent`（`src`） | その直下の設定・画像・ログ・音声 |
+| `綴り談話室.exe` | `Path(sys.executable).resolve().parent` | exeの隣の設定・画像・ログ・音声 |
+
+参考：[PyInstaller公式の実行時パスの説明](https://pyinstaller.org/en/stable/runtime-information.html)、
+[ビルドオプション](https://pyinstaller.org/en/stable/usage.html)。
+
+### 5. 配布 ZIP を作成する
+
+`dist\綴り談話室` フォルダを、そのフォルダごと ZIP にします。  
+配布版には、2つの README のうち **`README_PLAY.md` のみ同梱**します。
+
+配布前に、少なくとも次を確認してください。
+
+- `綴り談話室.exe` が起動する
+- Ollama のモデル一覧を取得できる
+- AI の返答を表示できる
+- チャット表示欄へ文字を入力できない
+- AI 返答中にキャラ・モデル・各種設定・クリア・保存を変更できない
+- `profiles.json` を読み込める
+- 壊れた `profiles.json` では、警告後に臨時プロフィールで起動する
+- キャラ変更時に対応する `avatar_id` へ切り替わる
+- アバター表示ONで画像、OFFで広いチャット欄を利用できる
+- アバター表示設定が再起動後も維持される
+- キャラクター画像や表情画像がなくてもdefault画像で動作する
+- exeの隣の `logs` フォルダへチャットログを保存できる
+- exeの隣の `user_settings.json` に設定が保存され、再起動で反映される
+- 音声生成中はexeの隣の `voice_cache` に一時音声が作られる（再生後は削除される）
+- `_internal` に利用者向けの設定・画像・ログ・音声が作られていない
+- VOICEVOX 使用時に音声を再生できる
+- `README_PLAY.md` と `licenses` フォルダが含まれている
 
 ---
 
-## VOICEVOX について
+## プロジェクト構成
 
-本アプリは、音声合成ソフトウェア **VOICEVOX** およびローカルで動作する **VOICEVOX ENGINE** を利用して音声を生成します。
+```text
+綴り談話室/
+├─ .gitignore
+├─ README.md
+├─ README_PLAY.md
+├─ licenses/
+│  ├─ application/
+│  └─ third_party/
+└─ src/
+   ├─ main.py
+   ├─ avatar_controller.py
+   ├─ profiles.json
+   └─ assets/
+      └─ avatars/
+         ├─ default/
+         │  ├─ normal.png
+         │  ├─ smile.png
+         │  ├─ happy.png
+         │  ├─ thinking.png
+         │  ├─ surprised.png
+         │  ├─ sad.png
+         │  └─ serious.png
+         │  
+            ets...
+```
 
-AI の回答を全文受信してから読み上げるのではなく、回答生成中の文章を適度な長さに分割し、順次音声を生成・再生します。
+実行時には、Python版では `main.py` の隣、exe版ではexeの隣に次のファイル・フォルダが必要に応じて作成されます。
 
-### 読み上げ機能
+```text
+logs/         # 保存したチャットログ
+voice_cache/  # VOICEVOXの一時音声ファイル
+user_settings.json  # アバター表示／非表示の保存設定
+```
 
-- 読み上げの ON／OFF
-- 話者 ID の指定
-- 読み上げの途中停止
-- 読み上げ開始前の VOICEVOX 接続確認
-- 生成済み音声の順次再生
-- 一時 WAV ファイルの自動削除
+`.gitignore` では、`__pycache__`、`.mypy_cache`、実行ログ、一時音声、
+PyInstaller の `build`・`dist` など、リポジトリへ含めない生成物を除外しています。
 
-初期設定の話者 ID は `3` です。  
-別の音声を使用する場合は、VOICEVOX の話者 ID を確認して変更してください。
+### キャラクター設定とアバター画像
 
-> [!IMPORTANT]
-> 生成される音声を利用する際は、VOICEVOX 本体および各キャラクター（話者）の利用規約・ライセンスをご確認ください。
+`profiles.json` の各キャラクターは、AIへ渡す `prompt` と画像フォルダ名を表す
+`avatar_id` を持ちます。
 
----
+```json
+{
+  "優しいAI": {
+    "prompt": "あなたは丁寧で優しいアシスタントです。",
+    "avatar_id": "kind"
+  }
+}
+```
 
-## 使用モジュール・ライブラリ
+この例の本番画像は `src/assets/avatars/kind/normal.png` へ置きます。表情差分は
+同じフォルダへ `smile.png`、`sad.png`、`angry.png`、`surprised.png`、
+`troubled.png`、`thinking.png` などの名前で追加します。
 
-### 標準ライブラリ
-
-- `json`  
-  AI プロフィール設定（JSON ファイル）の読み込みに使用します。
-
-- `threading`  
-  AI 応答の取得、音声生成、音声再生を別スレッドで実行するために使用します。
-
-- `pathlib`  
-  設定ファイル、ログ、音声キャッシュなどのパス管理に使用します。
-
-- `datetime`  
-  チャットログや一時音声ファイルの日時付きファイル名を生成するために使用します。
-
-- `time`  
-  音声再生中の待機処理やタイミング調整に使用します。
-
-- `queue`  
-  AI 応答、音声生成、音声再生の各処理間でデータを受け渡すために使用します。
-
-- `re`  
-  AI 応答の文章分割や、読み上げ用テキストの整形に使用します。
-
-### GUI 関連
-
-- `tkinter`  
-  デスクトップ GUI アプリケーションの構築に使用します。
-
-- `tkinter.scrolledtext`  
-  スクロール可能なチャット表示エリアに使用します。
-
-- `tkinter.ttk`  
-  モデルやキャラクターを選択するコンボボックスに使用します。
-
-### 外部ライブラリ
-
-- `requests`  
-  Ollama API および VOICEVOX ENGINE との通信に使用します。
-
-- `pygame`  
-  VOICEVOX で生成した WAV 音声の再生に使用します。
+指定画像がない場合は、同じキャラクターの `normal.png`、
+`assets/avatars/default/` 内の画像、内蔵プレースホルダーの順で切り替わります。
 
 ---
 
-## v2 の主な改良点・修正点
+## 技術情報
 
-### AI チャット機能
+### Ollama API
 
-- Ollama にインストールされているモデル一覧の自動取得に対応
-- GUI からのモデル一覧更新に対応
-- モデル切り替えに対応
-- Thinking モードの切り替えに対応（対応モデルのみ）
+- チャット送信: `http://localhost:11434/api/chat`
+- モデル一覧取得: `http://localhost:11434/api/tags`
 
-### VOICEVOX 連携
+アプリは起動時にモデル一覧を取得し、取得できなかった場合は予備モデル一覧を表示します。  
+「モデル更新」ボタンを押すと、現在インストールされているモデル一覧を再取得します。
 
-- AI 応答生成中からの順次読み上げに対応
-- 話者 ID の切り替えに対応
-- 読み上げ停止ボタンを追加
-- 音声生成と音声再生を分離したキュー処理を実装
-- 生成済み音声の先読み件数を制限
-- 一時音声キャッシュの自動管理に対応
-- 読み上げ開始前の VOICEVOX 接続確認を追加
-- VOICEVOX 未起動時や通信切断時のエラー表示を追加
+### Thinking モード
 
-### 既知の制限事項
+GUI の「Thinking」チェックボックスに応じて、Ollama API へ `think: true` または `think: false` を送信します。  
+対応状況や動作は、モデルおよび Ollama のバージョンによって異なります。
 
-- 初回の音声生成時や長い文章を読み上げる場合は、再生開始まで時間がかかることがあります。
-- PC の性能、使用する話者、文章の長さなどによって、音声生成や再生が安定しない場合があります。
-- 読み上げ停止後も、VOICEVOX ENGINE に送信済みの通信処理はすぐに終了しない場合があります。ただし、停止後に生成された音声は再生されません。
-- Thinking モードの対応状況は、モデルおよび Ollama のバージョンによって異なります。
-- Ollama や VOICEVOX が起動していない場合、該当する機能は利用できません。
+### ストリーミング応答とアバター
+
+Ollama API へ `stream: true` を送信し、回答本文を少しずつ表示します。  
+通常は返答先頭の短い感情タグを解析し、本文には表示せず、アバターの表情切り替えに使用します。
+画像の解決とフォールバックは `avatar_controller.py` に集約しています。
+
+### VOICEVOX ENGINE API
+
+- 接続確認: `http://127.0.0.1:50021/version`
+- 音声クエリ生成: `http://127.0.0.1:50021/audio_query`
+- 音声合成: `http://127.0.0.1:50021/synthesis`
+
+回答を適度な長さに分割し、生成中から順次音声を作成・再生します。
 
 ---
 
-## 注意事項
+## 既知の制限事項
 
-本アプリの AI 応答は、ローカル LLM によって自動生成されます。
+- Thinking モードの対応状況は、使用するモデルと Ollama のバージョンによって異なります。
+- PC の性能や使用モデルによって、AI の応答速度が大きく異なります。
+- 初回の音声生成や長文読み上げでは、再生開始まで時間がかかる場合があります。
+- 読み上げ停止後も、VOICEVOX ENGINE へ送信済みの処理が一時的に継続する場合があります。
+- Ollama または VOICEVOX のポート番号を変更している場合は、スクリプト側の設定変更が必要です。
+- ローカル LLM が感情形式を守らない場合は、表情を `neutral` にして本文を優先します。
+- アバターの口パクとまばたきには対応していません。
 
-キャラクターごとの口調や表現は、会話演出を目的としたものです。  
-医療・法律・金融・心理などに関する専門的な助言を行うものではありません。
+---
+
+## 開発について
+
+本プロジェクトの制作にあたり、OpenAI の対話型 AI「ChatGPT」のサポートを受け、アイデア出し、コード設計、実装、検証、文章表現の改善などを行いました。  
+
+使用した主なモデルは以下のとおりです。  
+
+* GPT-5.5
+* GPT-5.6
+* GPT-6 Astra
+
+利用プラン：ChatGPT Plus  
+
+開発に携わったすべての研究者、開発者、関係者の皆様に、心より感謝申し上げます。  
+
+
+### コントリビューションについて
+
+本リポジトリは個人学習・個人制作を目的としています。  
+そのため、Pull Request（PR）はお受けできません。ご了承ください。  
+
+---
+
+## 注意事項・免責事項
+
+本アプリの AI 応答は、ローカル LLM によって自動生成されます。  
+医療、法律、金融、心理などに関する専門的な助言を行うものではありません。
 
 出力内容の正確性、安全性、完全性は保証されません。  
 重要な判断を行う場合は、専門家または公的機関が提供する情報をご確認ください。
-
----
-
-## 免責事項
 
 本アプリの利用、設定変更、外部ソフトウェアとの連携などによって生じた損害、不具合、データ損失その他の問題について、作者は責任を負いません。  
 利用者自身の責任においてご使用ください。
 
 ---
 
-## このプロジェクトのライセンス
+## ライセンス
 
-本プロジェクトは、「コード」と「キャラクタープロンプト集」で
-それぞれ異なるライセンスを採用しています。
+本プロジェクトでは、収録内容に応じて異なるライセンスを適用しています。  
 
-### ■ アプリケーションコード
+### アプリケーションコード・アプリアイコン
 
-* **ライセンス**: MIT License
+**MIT License**
+
 * 商用利用：可能
 * 改変：可能
 * 再配布：可能
-ただし、以下の条件を満たす必要があります：  
 
-* **著作権表示とライセンス文の同梱**
+MIT Licenseは、著作権表示とライセンス文を残すことで、個人・商用を問わず、比較的自由に利用・改変・再配布できるライセンスです。  
 
-詳細は [LICENSE-CODE](./licenses/application/LICENSE-CODE.txt) をご確認ください。
+* [LICENSE-CODE](./licenses/application/LICENSE-CODE.txt)
 
-#### クレジット例
-
-```plaintext
-Code by AglaoDev-jp © 2026, licensed under the MIT License.
+```
+Code and App Icon by AglaoDev-jp © 2026
+Licensed under the MIT License.
 ```
 
-### ■ キャラクタープロンプト集
+### キャラクタープロンプト集
 
-本プロジェクトには、AIの応答スタイルを切り替えるための
-「キャラクタープロンプト集（Character Prompt Collection）」が含まれています。
+**Creative Commons Attribution 4.0 International（CC BY 4.0）**
 
-各キャラクターは、口調・性格・役割などを定義したプロンプトとして設計されており、
-用途に応じてAIの振る舞いを柔軟に変更することができます。
-
-* **ライセンス**: Creative Commons Attribution 4.0 International (CC BY 4.0)
 * 商用利用：可能
 * 改変：可能
 * 再配布：可能
+* クレジット表記：必要
 
-ただし、以下の条件を満たす必要があります：  
+CC BY 4.0は、作者への適切なクレジットを表示することで、個人・商用を問わず、作品の利用・改変・再配布ができるライセンスです。  
 
-* **クレジット表記（著作者の表示）を行うこと**  
-詳細は [LICENSE-CODE](./licenses/application/LICENSE-PROMPT.txt) をご確認ください。
+* [LICENSE-PROMPT](./licenses/application/LICENSE-PROMPT.txt)
+* [CC BY 4.0 公式ライセンス](https://creativecommons.org/licenses/by/4.0/)
 
-#### クレジット例
-
-```plaintext
+```
 Character Prompt Collection by AglaoDev-jp
 Licensed under CC BY 4.0
 ```
 
-### ライセンス設定の方針
+### 画像素材
 
-現在の AI 生成コンテンツを取り巻く状況を踏まえ、本プロジェクトでは、可能な限り利用条件が分かりやすく、自由に活用できるライセンス設定を目指しています。
+本プロジェクトに含まれる画像素材には、**Creative Commons Attribution 4.0 International（CC BY 4.0）**を適用します。  
 
-このライセンス設定は、権利の独占を目的とするものではありません。  
-利用条件やクレジット要件を明確にし、安心して利用・改変・再配布できる状態を整えることを目的としています。
+クレジットを表示し、CC BY 4.0の条件を守ることで、画像の利用・加工・再配布が可能です。  
 
-今後、法制度や AI 生成コンテンツを取り巻く状況に変化があった場合は、必要に応じてライセンス設定を見直す可能性があります。
+* [LICENSE-IMAGE](./licenses/application/LICENSE-IMAGE.txt)
+* [CC BY 4.0 公式ライセンス](https://creativecommons.org/licenses/by/4.0/)
+
+```
+Image Collection by AglaoDev-jp
+Licensed under CC BY 4.0
+```
 
 ---
 
 ## 第三者ソフトウェアの著作権・ライセンス
 
-### ライセンスファイル一覧
+本プロジェクトでは、以下の第三者ソフトウェアやライブラリを使用しています。  
 
-- [Python License](./licenses/LICENSE-PSF.txt)
-- [Tcl/Tk License](./licenses/third_party/LICENSE-TclTk.txt)
-- [Pygame LGPL v2.1](./licenses/third_party/LGPL_v2.1.txt)
-- [Requests Apache License 2.0](./licenses/third_party/requests_LICENSE.txt)
-- [Requests NOTICE](./licenses/third_party/requests_NOTICE.txt)
+それぞれ本プロジェクトとは別の著作権・ライセンスが適用されます。詳しい条件については、各ライセンスファイルおよび公式サイトをご確認ください。  
 
-### Python
+* **Python** — PSF License Version 2
+  Copyright © 2001 Python Software Foundation. All rights reserved.
+  [ライセンスファイル](./licenses/LICENSE-PSF.txt) / [Python公式ライセンス](https://docs.python.org/3/license.html)
 
-- Copyright © 2001 Python Software Foundation. All rights reserved.
-- Licensed under the PSF License Version 2.
-- [Python 公式ライセンス](https://docs.python.org/3/license.html)
+* **Tcl/Tk** — Tcl/Tk License
+  [ライセンスファイル](./licenses/third_party/LICENSE-TclTk.txt) / [Tcl/Tk公式ライセンス](https://www.tcl.tk/software/tcltk/license.html)
 
-### Tkinter / Tcl/Tk
+* **Pygame** — LGPL v2.1
+  [ライセンスファイル](./licenses/third_party/LGPL_v2.1.txt)
 
-Tkinter は Python に含まれる GUI ライブラリですが、その動作には Tcl/Tk が使用されています。
+* **Requests** — Apache License 2.0
+  [ライセンスファイル](./licenses/third_party/requests_LICENSE.txt) / [NOTICE](./licenses/third_party/requests_NOTICE.txt)
 
-- [Tcl/Tk License](https://www.tcl.tk/software/tcltk/license.html)
+### 外部ソフトウェア・生成ツール
 
-### Pygame
+* [Ollama](https://ollama.com/)
+* [VOICEVOX](https://voicevox.hiroshiba.jp/)
+* [ACE-Step 1.5](https://github.com/ace-step/ACE-Step-1.5)
 
-- License: LGPL v2.1
-- [ライセンスファイル](./licenses/third_party/LGPL_v2.1.txt)
+VOICEVOXで生成した音声を利用する場合は、VOICEVOX本体および使用するキャラクター（話者）の利用規約・ライセンスをご確認ください。  
 
-### Requests
+Ollamaで使用する各AIモデルにも、それぞれモデル提供元が定めたライセンスがあります。モデルを利用・配布する際は、各モデルのライセンスをご確認ください。  
 
-- License: Apache License 2.0
-- [ライセンスファイル](./licenses/third_party/requests_LICENSE.txt)
-- [NOTICE](./licenses/third_party/requests_NOTICE.txt)
-
-### 外部ソフトウェア
-
-- [Ollama](https://ollama.com/)
-- [VOICEVOX](https://voicevox.hiroshiba.jp/)
-
-これらのプロジェクトの開発者、貢献者、関係者の皆様に、心より感謝申し上げます。
+これらのプロジェクトの開発者、貢献者、関係者の皆様に感謝申し上げます。  
 
 ---
+
 
 © 2026 AglaoDev-jp

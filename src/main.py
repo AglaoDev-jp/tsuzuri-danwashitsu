@@ -1,4 +1,6 @@
 """
+Application: 綴り談話室 v1
+
 Copyright © 2026 AglaoDev-jp
 Licensed under the MIT License.
 See the LICENSE file for full license text.
@@ -27,10 +29,11 @@ External Libraries used in this project:
 Special thanks to all developers and contributors who made these libraries possible.
 """
 
+import sys
 import requests
 import json
 import tkinter as tk
-from tkinter import scrolledtext, ttk
+from tkinter import messagebox, scrolledtext, ttk
 import threading
 import time
 import re
@@ -38,6 +41,14 @@ import queue
 import pygame
 from pathlib import Path
 from datetime import datetime
+
+from avatar_controller import (
+    AvatarController,
+    AvatarResponseStreamParser,
+    DEFAULT_AVATAR_ID,
+    VALID_EMOTIONS,
+    normalize_avatar_id,
+)
 
 # =========================
 # Ollama API 設定
@@ -88,6 +99,25 @@ SAFETY_GUIDE = """
 """
 
 
+# =========================
+# アバター用の応答形式
+# =========================
+# JSON形式は感情と本文を明確に分離できますが、JSON全体が完成するまでは
+# 安全に本文だけを取り出せません。既存のストリーミング表示・順次読み上げを
+# 維持するため、通常は先頭1行の短いタグをLLMへ依頼します。
+# JSONで返したモデルにも対応できるよう、解析側では両方の形式を受け入れます。
+AVATAR_RESPONSE_GUIDE = f"""
+内部出力ルール:
+以下の内容はユーザーへの返答本文では説明しないこと。
+
+- 返答の先頭に、必ず [[emotion:表情タグ]] という1行を置く。
+- 表情タグは次の中から1つだけ選ぶ: {", ".join(VALID_EMOTIONS)}
+- 2行目以降に、ユーザーへ見せる通常の返答本文を書く。
+- 例: [[emotion:smile]] の次の行に「それは面白そうですね。」と書く。
+- 表情タグ以外は、これまで指定されたキャラクター設定と安全ルールに従う。
+"""
+
+
 def build_system_prompt(profile_text):
     """
     キャラ設定と安全ガイドラインを1つのsystemメッセージにまとめる。
@@ -96,13 +126,51 @@ def build_system_prompt(profile_text):
     ここでは「キャラ設定 + 共通安全ルール」を1つにまとめて管理します。
     これにより、キャラ変更・チャットクリア時にも同じ安全ルールを確実に再適用できます。
     """
-    return f"{profile_text.strip()}\n\n{SAFETY_GUIDE.strip()}"
+    return (
+        f"{profile_text.strip()}\n\n"
+        f"{SAFETY_GUIDE.strip()}\n\n"
+        f"{AVATAR_RESPONSE_GUIDE.strip()}"
+    )
 
 # =========================
-# JSON読み込み（pathlib使用）
+# 利用者が扱うファイルの基準フォルダ（pathlib使用）
 # =========================
-BASE_DIR = Path(__file__).parent  # スクリプトと同じフォルダ
+# PyInstallerで作ったexeでは、sys.frozenがTrueになります。
+# Pythonから直接実行するときはこの属性がないため、getattrでFalseを既定値にします。
+if getattr(sys, "frozen", False):
+    # exe版：起動したexeが置かれているフォルダを基準にします。
+    # exe版の__file__は_internal内を指すため、利用者のデータには使いません。
+    BASE_DIR = Path(sys.executable).resolve().parent
+else:
+    # Python版：main.pyが置かれているフォルダ（このプロジェクトではsrc）です。
+    # sys.executableはPython本体を指すため、こちらでは__file__を使います。
+    BASE_DIR = Path(__file__).resolve().parent
+
+# 以下の設定・画像・ログ・音声は、すべてこのBASE_DIRを基準に扱います。
+# コマンドを実行した作業フォルダが違っても、参照先・保存先は変わりません。
+# Pythonランタイムなどの内部ファイルはPyInstallerに任せます。
+# 現在はアプリが直接読む内部専用リソースがないため、別の基準パスは不要です。
 JSON_PATH = BASE_DIR / "profiles.json"
+
+# profiles.json を読み込めない場合でも、アプリを強制終了させないための
+# 臨時プロフィールです。ファイルそのものは上書きせず、メモリ上だけで使用します。
+FALLBACK_PROFILE_NAME = "標準AI（臨時）"
+FALLBACK_PROFILE_PROMPT = """
+あなたは、落ち着いた丁寧な口調で会話するAIアシスタントです。
+ユーザーの質問や相談に対して、分かりやすく誠実に回答してください。
+"""
+
+# アバター画像はVOICEVOXの話者とは独立して、このフォルダから読み込みます。
+# 各キャラクターの画像は ``AVATARS_DIR / avatar_id`` に配置します。
+AVATARS_DIR = BASE_DIR / "assets" / "avatars"
+
+# 利用者ごとの表示設定です。ファイルがない初回起動時はアバター表示ONにします。
+# PyInstallerのフォルダ形式でも実行ファイルと同じ場所へ保存されるため、再起動後も
+# 「AIアバターを表示する」の選択を維持できます。
+USER_SETTINGS_PATH = BASE_DIR / "user_settings.json"
+DEFAULT_USER_SETTINGS = {
+    "show_ai_avatar": True,
+}
 
 # 生成した音声を保存するフォルダです。
 # 毎回同じファイル名で上書きするので、音声ファイルが大量に増えることはありません。
@@ -137,8 +205,125 @@ def cleanup_voice_cache():
 # 前回の異常終了などで残った一時音声を、起動時に掃除します。
 cleanup_voice_cache()
 
-with open(JSON_PATH, "r", encoding="utf-8") as f:
-    AI_PROFILES = json.load(f)
+
+def load_ai_profiles(json_path):
+    """profiles.json を安全に読み込み、プロフィール辞書と警告文を返す。
+
+    ファイルが存在しない場合、JSONの書式が壊れている場合、内容が空の場合でも、
+    臨時プロフィールを使ってGUIを起動します。利用者が修正できるよう、元ファイルは
+    自動変更せず、詳しい原因はGUI起動後に警告ダイアログで表示します。
+    """
+    try:
+        with json_path.open("r", encoding="utf-8") as f:
+            profiles = json.load(f)
+
+        if not isinstance(profiles, dict) or not profiles:
+            raise ValueError("1件以上のプロフィールを持つJSONオブジェクトが必要です。")
+
+        normalized_profiles = {}
+
+        # 新形式は ``{"prompt": "...", "avatar_id": "..."}`` です。
+        # 旧版の ``"キャラ名": "プロンプト"`` も引き続き受け入れ、利用者が
+        # profiles.jsonを一度に書き換えなくても起動できるようにします。
+        for profile_name, profile_data in profiles.items():
+            if not isinstance(profile_name, str) or not profile_name.strip():
+                raise ValueError("プロフィール名には空でない文字列を指定してください。")
+
+            if isinstance(profile_data, str):
+                profile_prompt = profile_data
+                avatar_id = DEFAULT_AVATAR_ID
+            elif isinstance(profile_data, dict):
+                profile_prompt = profile_data.get("prompt")
+                avatar_id = profile_data.get("avatar_id", DEFAULT_AVATAR_ID)
+            else:
+                raise ValueError(
+                    f"プロフィール「{profile_name}」の内容には、文字列または"
+                    "prompt/avatar_idを持つオブジェクトを指定してください。"
+                )
+
+            # プロンプトの空文字列は「追加のキャラクター設定なし」という標準モードとして
+            # 以前から使用しているため、正常な値として受け入れます。
+            if not isinstance(profile_prompt, str):
+                raise ValueError(
+                    f"プロフィール「{profile_name}」のpromptには文字列を指定してください。"
+                )
+
+            # avatar_idの欠落・型違い・パス形式はエラーにせずdefaultへ戻します。
+            # アバター設定のミスだけで会話機能まで使えなくなることを防ぎます。
+            normalized_profiles[profile_name] = {
+                "prompt": profile_prompt,
+                "avatar_id": normalize_avatar_id(avatar_id),
+            }
+
+        return normalized_profiles, None
+
+    except FileNotFoundError:
+        error_detail = "profiles.json が見つかりません。"
+    except json.JSONDecodeError as e:
+        error_detail = (
+            "JSONの書式が正しくありません。"
+            f"（{e.lineno}行目・{e.colno}文字目）"
+        )
+    except UnicodeDecodeError:
+        error_detail = "文字コードを読み取れません。UTF-8形式で保存してください。"
+    except (OSError, ValueError) as e:
+        error_detail = str(e)
+
+    fallback_profiles = {
+        FALLBACK_PROFILE_NAME: {
+            "prompt": FALLBACK_PROFILE_PROMPT.strip(),
+            "avatar_id": DEFAULT_AVATAR_ID,
+        }
+    }
+    warning_message = (
+        "profiles.json を読み込めなかったため、臨時の「標準AI」で起動しました。\n\n"
+        f"対象ファイル: {json_path}\n"
+        f"原因: {error_detail}\n\n"
+        "元のファイルは変更していません。profiles.json を修正してから、"
+        "綴り談話室を再起動してください。"
+    )
+    return fallback_profiles, warning_message
+
+
+def load_user_settings(settings_path):
+    """利用者設定を安全に読み込み、未設定・破損時は既定値を返します。"""
+    settings = DEFAULT_USER_SETTINGS.copy()
+
+    try:
+        with settings_path.open("r", encoding="utf-8") as file:
+            loaded = json.load(file)
+
+        if isinstance(loaded, dict) and isinstance(loaded.get("show_ai_avatar"), bool):
+            settings["show_ai_avatar"] = loaded["show_ai_avatar"]
+    except (FileNotFoundError, json.JSONDecodeError, UnicodeDecodeError, OSError):
+        # 設定ファイルの不具合でアプリを起動不能にせず、既定値で続行します。
+        pass
+
+    return settings
+
+
+def save_user_settings(settings_path, settings):
+    """利用者設定を一時ファイル経由で保存し、成功したかどうかを返します。"""
+    temporary_path = settings_path.with_name(f"{settings_path.name}.tmp")
+
+    try:
+        # 途中でアプリが終了しても本体JSONを壊しにくいよう、一度別名で書きます。
+        with temporary_path.open("w", encoding="utf-8") as file:
+            json.dump(settings, file, ensure_ascii=False, indent=2)
+            file.write("\n")
+
+        temporary_path.replace(settings_path)
+        return True
+    except OSError:
+        try:
+            temporary_path.unlink(missing_ok=True)
+        except OSError:
+            pass
+        return False
+
+
+AI_PROFILES, PROFILE_LOAD_WARNING = load_ai_profiles(JSON_PATH)
+USER_SETTINGS = load_user_settings(USER_SETTINGS_PATH)
 
 profile_names = list(AI_PROFILES.keys())
 
@@ -154,7 +339,7 @@ def save_chat_log():
     chat_text = chat_area.get("1.0", tk.END).strip()
 
     if not chat_text:
-        chat_area.insert(tk.END, "\n--- 保存するチャットログがありません ---\n")
+        append_chat_text("\n--- 保存するチャットログがありません ---\n")
         return
 
     # 日時つきファイル名を作成
@@ -167,8 +352,7 @@ def save_chat_log():
     with open(log_path, "w", encoding="utf-8") as f:
         f.write(chat_text)
 
-    chat_area.insert(tk.END, f"\n--- チャットログを保存しました: {log_path.name} ---\n")
-    chat_area.see(tk.END)
+    append_chat_text(f"\n--- チャットログを保存しました: {log_path.name} ---\n")
 
 
 # =========================
@@ -179,6 +363,10 @@ def save_chat_log():
 current_voice_stop_event = None
 current_voice_text_queue = None
 current_voice_audio_queue = None
+
+# AI返答中にキャラ変更やクリアが割り込んで会話履歴を混線させないため、
+# GUI操作のロック状態を明示的に管理します。
+response_in_progress = False
 
 
 def drain_queue(target_queue):
@@ -291,8 +479,7 @@ def stop_voice_playback(show_message=True, cleanup_cache=True):
         pass
 
     if show_message:
-        chat_area.insert(tk.END, "\n--- VOICEVOX読み上げを停止しました ---\n")
-        chat_area.see(tk.END)
+        append_chat_text("\n--- VOICEVOX読み上げを停止しました ---\n")
 
 
 # =========================
@@ -377,7 +564,7 @@ def play_voice_file(file_path, stop_event=None):
         return
 
     # ファイル生成直後でも読み込みが安定するよう、ごく短く待ちます。
-    # v5の0.2秒より短くしていますが、完全には削除せず安定性も残しています。
+    # 以前の0.2秒より短くしていますが、完全には削除せず安定性も残しています。
     time.sleep(0.05)
 
     pygame.mixer.music.load(str(file_path))
@@ -442,17 +629,17 @@ def split_text_for_voice(text, max_length=80):
         1チャンクの目安文字数です。
         まずは80文字くらいが安定しやすいです。
     """
-    text = clean_text_for_voice(text)
+    text = clean_text_for_voice(text) # ← 軽く整える。
 
     if not text:
-        return []
+        return [] # 何もないなら空を返す。
 
     # 「。」などの区切り記号を残したまま分割します。
     # 例: "こんにちは。元気？" → ["こんにちは。", "元気？"]
     parts = re.split(r"(?<=[。！？!?])|\n+", text)
 
-    chunks = []
-    current = ""
+    chunks = [] # できたものをここに入れる。
+    current = "" # ここで文章を作る。
 
     for part in parts:
         part = part.strip()
@@ -483,7 +670,7 @@ def split_text_for_voice(text, max_length=80):
                         piece = sub[i:i + max_length].strip()
                         if piece:
                             chunks.append(piece)
-                    current = ""
+                    current = "" # ここで必ず空に。
                 else:
                     current = sub
 
@@ -502,7 +689,7 @@ def extract_ready_voice_chunks(
     """
     Ollamaのストリーミング返答から、確定した文章を早めに取り出す。
 
-    v7の方針:
+    方針:
         - 20文字未満の短文は、細切れ音声を避けるため次の文を待つ。
         - 20～120文字では、最初に見つかった自然な文末で早めに送る。
         - 120文字を超えた場合は、文末・読点・空白の順で安全に区切る。
@@ -626,43 +813,29 @@ def voice_generator_worker(text_queue, audio_queue, speaker_id, request_id, stop
             should_abort_voice = True
             chat_area.after(
                 0,
-                lambda: (
-                    chat_area.insert(
-                        tk.END,
-                        "\n--- VOICEVOXとの接続が途中で切れたため、今回の読み上げを終了しました。---\n"
-                    ),
-                    chat_area.see(tk.END)
-                )
+                append_chat_text,
+                "\n--- VOICEVOXとの接続が途中で切れたため、今回の読み上げを終了しました。---\n"
             )
         except requests.exceptions.Timeout:
             should_abort_voice = True
             chat_area.after(
                 0,
-                lambda: (
-                    chat_area.insert(
-                        tk.END,
-                        "\n--- VOICEVOXの音声生成がタイムアウトしたため、今回の読み上げを終了しました。---\n"
-                    ),
-                    chat_area.see(tk.END)
-                )
+                append_chat_text,
+                "\n--- VOICEVOXの音声生成がタイムアウトしたため、今回の読み上げを終了しました。---\n"
             )
         except requests.RequestException as e:
             should_abort_voice = True
             chat_area.after(
                 0,
-                lambda err=e: (
-                    chat_area.insert(tk.END, f"\n--- VOICEVOX通信エラー: {err}　今回の読み上げを終了しました。---\n"),
-                    chat_area.see(tk.END)
-                )
+                append_chat_text,
+                f"\n--- VOICEVOX通信エラー: {e}　今回の読み上げを終了しました。---\n"
             )
         except Exception as e:
             should_abort_voice = True
             chat_area.after(
                 0,
-                lambda err=e: (
-                    chat_area.insert(tk.END, f"\n--- VOICEVOX生成エラー: {err}　今回の読み上げを終了しました。---\n"),
-                    chat_area.see(tk.END)
-                )
+                append_chat_text,
+                f"\n--- VOICEVOX生成エラー: {e}　今回の読み上げを終了しました。---\n"
             )
         finally:
             text_queue.task_done()
@@ -724,10 +897,8 @@ def voice_player_worker(audio_queue, stop_event):
                 stop_event.set()
                 chat_area.after(
                     0,
-                    lambda err=e: (
-                        chat_area.insert(tk.END, f"\n--- 音声再生エラー: {err} ---\n"),
-                        chat_area.see(tk.END)
-                    )
+                    append_chat_text,
+                    f"\n--- 音声再生エラー: {e} ---\n"
                 )
             finally:
                 audio_queue.task_done()
@@ -739,9 +910,9 @@ def voice_player_worker(audio_queue, stop_event):
         if played_count and not stop_event.is_set():
             chat_area.after(
                 0,
-                lambda: chat_area.insert(tk.END, "\n--- VOICEVOX読み上げ完了 ---\n")
+                append_chat_text,
+                "\n--- VOICEVOX読み上げ完了 ---\n"
             )
-            chat_area.after(0, chat_area.see, tk.END)
 
         # 未再生ファイルが残った場合に削除します。
         if stop_event.is_set():
@@ -774,13 +945,8 @@ def start_voice_pipeline(speaker_id):
     if not check_voicevox_connection():
         chat_area.after(
             0,
-            lambda: (
-                chat_area.insert(
-                    tk.END,
-                    "\n--- VOICEVOXに接続できませんでした。VOICEVOXを起動してください。---\n"
-                ),
-                chat_area.see(tk.END)
-            )
+            append_chat_text,
+            "\n--- VOICEVOXに接続できませんでした。VOICEVOXを起動してください。---\n"
         )
         chat_area.after(0, lambda: stop_voice_button.config(state=tk.DISABLED))
         return None
@@ -814,9 +980,9 @@ def start_voice_pipeline(speaker_id):
 
     chat_area.after(
         0,
-        lambda: chat_area.insert(tk.END, "\n--- VOICEVOXストリーミング読み上げ開始 ---\n")
+        append_chat_text,
+        "\n--- VOICEVOXストリーミング読み上げ開始 ---\n"
     )
-    chat_area.after(0, chat_area.see, tk.END)
     chat_area.after(0, lambda: stop_voice_button.config(state=tk.NORMAL))
 
     return text_queue, audio_queue, generator_thread, player_thread, stop_event
@@ -831,7 +997,7 @@ selected_name = profile_names[0]
 messages = [
     {
         "role": "system",
-        "content": build_system_prompt(AI_PROFILES[selected_name])
+        "content": build_system_prompt(AI_PROFILES[selected_name]["prompt"])
     }
 ]
 
@@ -880,6 +1046,9 @@ def fetch_ollama_models():
 
 def refresh_model_list():
     """モデル一覧を再取得して、モデル選択コンボボックスに反映する。"""
+    if response_in_progress:
+        return
+
     models = fetch_ollama_models()
     current_model = model_var.get()
 
@@ -892,8 +1061,7 @@ def refresh_model_list():
     else:
         model_var.set(models[0])
 
-    chat_area.insert(tk.END, "\n--- モデル一覧を更新しました ---\n")
-    chat_area.see(tk.END)
+    append_chat_text("\n--- モデル一覧を更新しました ---\n")
 
 
 # =========================
@@ -903,17 +1071,23 @@ def change_profile(event=None):
     """キャラ選択を変更したとき、会話履歴を新しいsystem設定だけに戻す。"""
     global messages
 
+    if response_in_progress:
+        return
+
     selected = profile_var.get()
 
     messages = [
         {
             "role": "system",
-            "content": build_system_prompt(AI_PROFILES[selected])
+            "content": build_system_prompt(AI_PROFILES[selected]["prompt"])
         }
     ]
 
-    chat_area.insert(tk.END, f"\n--- キャラを「{selected}」に変更しました ---\n")
-    chat_area.see(tk.END)
+    append_chat_text(f"\n--- キャラを「{selected}」に変更しました ---\n")
+    avatar_controller.set_avatar(
+        AI_PROFILES[selected]["avatar_id"],
+        emotion="normal",
+    )
 
 
 # =========================
@@ -923,21 +1097,45 @@ def clear_chat():
     """チャット欄と会話履歴をリセットする。"""
     global messages
 
+    if response_in_progress:
+        return
+
     selected = profile_var.get()
 
     # 会話履歴を、現在選択中のキャラ設定だけに戻す
     messages = [
         {
             "role": "system",
-            "content": build_system_prompt(AI_PROFILES[selected])
+            "content": build_system_prompt(AI_PROFILES[selected]["prompt"])
         }
     ]
 
-    # チャット表示欄をすべて削除
-    chat_area.delete("1.0", tk.END)
+    # チャット表示欄を消去し、クリア完了メッセージへ置き換えます。
+    replace_chat_text(f"--- チャット内容をクリアしました（{selected}）---\n")
+    avatar_controller.set_avatar(
+        AI_PROFILES[selected]["avatar_id"],
+        emotion="normal",
+    )
 
-    # 任意：クリアしたことを表示
-    chat_area.insert(tk.END, f"--- チャット内容をクリアしました（{selected}）---\n")
+
+def apply_avatar_visibility(save_setting=True):
+    """チェック状態に合わせ、アバター領域そのものを表示または収納します。"""
+    is_visible = bool(avatar_visible_var.get())
+
+    if is_visible:
+        # grid_remove()前の配置情報を使って、元の位置へ正確に戻します。
+        avatar_frame.grid()
+    else:
+        # 透明画像ではなく右側のフレームごと外し、チャット欄へ横幅を譲ります。
+        avatar_frame.grid_remove()
+
+    USER_SETTINGS["show_ai_avatar"] = is_visible
+
+    if save_setting and not save_user_settings(USER_SETTINGS_PATH, USER_SETTINGS):
+        append_chat_text(
+            "\n--- アバター表示設定を保存できませんでした。"
+            "次回起動時は既定値に戻る場合があります。 ---\n"
+        )
 
 
 # =========================
@@ -945,6 +1143,11 @@ def clear_chat():
 # =========================
 def send_message():
     """入力欄の文章を取得して、別スレッドでOllamaへ送信する。"""
+    global response_in_progress
+
+    if response_in_progress:
+        return
+
     user_input = entry.get().strip()
 
     if not user_input:
@@ -952,33 +1155,62 @@ def send_message():
 
     selected_model = model_var.get().strip()
     if not selected_model:
-        chat_area.insert(tk.END, "\n--- モデルが選択されていません ---\n")
+        append_chat_text("\n--- モデルが選択されていません ---\n")
         return
+
+    # Tkinter変数はメインスレッドで読み取り、ワーカースレッドへ通常の値として渡します。
+    # これにより、返答中に設定を固定できるだけでなく、Tkinterのスレッド競合も避けます。
+    think_enabled = think_var.get()
+    voice_enabled = voice_enabled_var.get()
+    speaker_value = speaker_var.get()
 
     # 入力欄を空にする
     entry.delete(0, tk.END)
 
-    # 連続送信による混線を避けるため、返答中は送信ボタンを無効化します。
+    # 連続送信や設定変更による混線を避けるため、返答中は関連操作を無効化します。
+    response_in_progress = True
     send_button.config(state=tk.DISABLED)
     entry.config(state=tk.DISABLED)
+    set_response_controls_enabled(False)
 
     # Thinkingの状態を見えるように表示します。
     # OFFなら通常回答、ONなら対応モデルで思考モードを使います。
-    think_mode = "ON" if think_var.get() else "OFF"
+    think_mode = "ON" if think_enabled else "OFF"
 
-    chat_area.insert(tk.END, f"\n[Model: {selected_model} / Thinking: {think_mode}]\n")
-    chat_area.insert(tk.END, f"あなた: {user_input}\n")
-    chat_area.insert(tk.END, "AI: ")
-    chat_area.see(tk.END)
+    append_chat_text(
+        f"\n[Model: {selected_model} / Thinking: {think_mode}]\n"
+        f"あなた: {user_input}\n"
+        "AI: "
+    )
 
-    threading.Thread(
-        target=get_ai_response,
-        args=(user_input, selected_model, think_var.get()),
-        daemon=True
-    ).start()
+    # Ollamaの返答待ちであることを、チャット本文とは独立して表現します。
+    avatar_controller.set_emotion("thinking")
+
+    try:
+        threading.Thread(
+            target=get_ai_response,
+            args=(
+                user_input,
+                selected_model,
+                think_enabled,
+                voice_enabled,
+                speaker_value,
+            ),
+            daemon=True
+        ).start()
+    except RuntimeError as e:
+        # スレッドを開始できなかった場合も、操作不能な状態を残しません。
+        append_chat_text(f"\n--- 応答処理を開始できませんでした: {e} ---\n")
+        finish_response_ui()
 
 
-def get_ai_response(user_input, selected_model, think_enabled):
+def get_ai_response(
+    user_input,
+    selected_model,
+    think_enabled,
+    voice_enabled,
+    speaker_value,
+):
     """
     Ollamaへメッセージを送り、ストリーミングで返答を受け取る。
 
@@ -989,9 +1221,12 @@ def get_ai_response(user_input, selected_model, think_enabled):
         True  → Ollama APIへ "think": true を送る。
         False → Ollama APIへ "think": false を送る。
 
+    voice_enabled / speaker_value:
+        送信時点のVOICEVOX設定。Tkinter変数をワーカースレッドから直接読みません。
+
     注意:
         Tkinterの画面更新はメインスレッドで行う必要があるため、
-        chat_area.insert などは chat_area.after(...) 経由で実行します。
+        append_chat_text などは chat_area.after(...) 経由で実行します。
     """
     global messages
 
@@ -1000,10 +1235,13 @@ def get_ai_response(user_input, selected_model, think_enabled):
         "content": user_input
     })
 
+    # 先頭の感情タグを画面やVOICEVOXへ流さず、本文だけを取り出します。
+    # JSON形式や不正な形式が返っても、finish() が安全なフォールバックを行います。
+    avatar_response_parser = AvatarResponseStreamParser()
     assistant_message = ""
 
     # VOICEVOX読み上げ用の変数です。
-    # voice_enabled_var がONなら、AIの返答を待ち受けながら、
+    # 送信時点で読み上げがONなら、AIの返答を待ち受けながら、
     # 1文単位でVOICEVOXへ流していきます。
     voice_active = False
     voice_text_queue = None
@@ -1013,12 +1251,48 @@ def get_ai_response(user_input, selected_model, think_enabled):
     voice_stop_event = None
     pending_voice_text = ""
 
+    def handle_visible_content(content):
+        """本文チャンクをチャット表示とVOICEVOXの両方へ渡します。
+
+        感情タグの解析処理をこの関数より前に置くことで、制御用の文字列が
+        ユーザー画面や読み上げ音声へ混ざらないようにしています。
+        """
+        nonlocal pending_voice_text
+
+        if not content:
+            return
+
+        chat_area.after(
+            0,
+            append_chat_text,
+            content
+        )
+
+        # VOICEVOXがONなら、表示と同じ本文を読み上げ用バッファへ追加します。
+        # 句点などで1文が完成したら、既存の音声生成Queueへすぐ送ります。
+        if (
+            voice_active
+            and voice_text_queue is not None
+            and voice_stop_event is not None
+            and not voice_stop_event.is_set()
+        ):
+            pending_voice_text += content
+            ready_chunks, pending_voice_text = extract_ready_voice_chunks(
+                pending_voice_text,
+                min_length=20,
+                target_length=60,
+                max_length=120
+            )
+            for chunk in ready_chunks:
+                if not voice_stop_event.is_set():
+                    voice_text_queue.put(chunk)
+
     try:
         # 読み上げONの場合、Ollamaへ問い合わせる前に音声生成・再生スレッドを起動します。
         # これにより、AIの返答が全文完成する前から音声生成を始められます。
-        if voice_enabled_var.get():
+        if voice_enabled:
             try:
-                speaker_id = int(speaker_var.get())
+                speaker_id = int(speaker_value)
                 voice_pipeline = start_voice_pipeline(speaker_id)
 
                 # VOICEVOXへ接続できた場合だけ、読み上げ処理を有効にします。
@@ -1035,7 +1309,8 @@ def get_ai_response(user_input, selected_model, think_enabled):
             except ValueError:
                 chat_area.after(
                     0,
-                    lambda: chat_area.insert(tk.END, "\n--- 話者IDは数字で入力してください。読み上げはOFF扱いで続行します。---\n")
+                    append_chat_text,
+                    "\n--- 話者IDは数字で入力してください。読み上げはOFF扱いで続行します。---\n"
                 )
 
         response = requests.post(
@@ -1069,32 +1344,13 @@ def get_ai_response(user_input, selected_model, think_enabled):
                 # 通常は表示しない方が見やすいので、ここでは回答本文 content だけを表示します。
                 # 将来「思考内容も表示する」チェックを追加したい場合は、ここで拾う形にできます。
                 if content:
-                    assistant_message += content
+                    visible_content, detected_emotion = avatar_response_parser.feed(content)
 
-                    chat_area.after(
-                        0,
-                        lambda c=content: chat_area.insert(tk.END, c)
-                    )
-                    chat_area.after(0, chat_area.see, tk.END)
+                    # 先頭タグを受信できた時点でthinking表示から返答の表情へ切り替えます。
+                    if detected_emotion is not None:
+                        avatar_controller.set_emotion(detected_emotion)
 
-                    # VOICEVOXがONなら、表示と同時に読み上げ用バッファにも追加します。
-                    # 句点などで1文が完成したら、すぐ音声生成Queueへ送ります。
-                    if (
-                        voice_active
-                        and voice_text_queue is not None
-                        and voice_stop_event is not None
-                        and not voice_stop_event.is_set()
-                    ):
-                        pending_voice_text += content
-                        ready_chunks, pending_voice_text = extract_ready_voice_chunks(
-                            pending_voice_text,
-                            min_length=20,
-                            target_length=60,
-                            max_length=120
-                        )
-                        for chunk in ready_chunks:
-                            if not voice_stop_event.is_set():
-                                voice_text_queue.put(chunk)
+                    handle_visible_content(visible_content)
 
             # done が True なら、そのレスポンスで生成終了です。
             if data.get("done"):
@@ -1102,14 +1358,25 @@ def get_ai_response(user_input, selected_model, think_enabled):
 
     except requests.exceptions.ConnectionError:
         error_text = "\n\n--- Ollamaに接続できませんでした。Ollamaが起動しているか確認してください。---\n"
-        chat_area.after(0, lambda: chat_area.insert(tk.END, error_text))
+        chat_area.after(0, append_chat_text, error_text)
     except requests.exceptions.Timeout:
         error_text = "\n\n--- 応答がタイムアウトしました。モデルが重い場合は、もう少し軽いモデルを試してください。---\n"
-        chat_area.after(0, lambda: chat_area.insert(tk.END, error_text))
+        chat_area.after(0, append_chat_text, error_text)
     except requests.RequestException as e:
         error_text = f"\n\n--- 通信エラーが発生しました: {e} ---\n"
-        chat_area.after(0, lambda: chat_area.insert(tk.END, error_text))
+        chat_area.after(0, append_chat_text, error_text)
     finally:
+        # 返答完了時にJSON・先頭タグ・通常文のどの形式だったかを確定します。
+        # 解析に失敗しても、本文は可能な限り残り、表情だけneutralになります。
+        remaining_text, final_emotion, assistant_message = avatar_response_parser.finish()
+        handle_visible_content(remaining_text)
+
+        if assistant_message:
+            avatar_controller.set_emotion(final_emotion)
+        else:
+            # 通信エラーなどで返答がなかった場合にthinking表示を残しません。
+            avatar_controller.set_emotion("normal")
+
         # AIの返答が空でなければ会話履歴に保存します。
         # エラー時に空の返答を履歴へ入れないための分岐です。
         if assistant_message:
@@ -1141,19 +1408,16 @@ def get_ai_response(user_input, selected_model, think_enabled):
             if voice_player_thread is not None:
                 voice_player_thread.join(timeout=0.2)
 
-        # 改行を入れ、送信ボタンと入力欄を復活させます。
-        chat_area.after(0, lambda: chat_area.insert(tk.END, "\n"))
-        chat_area.after(0, chat_area.see, tk.END)
-        chat_area.after(0, lambda: send_button.config(state=tk.NORMAL))
-        chat_area.after(0, lambda: entry.config(state=tk.NORMAL))
-        chat_area.after(0, entry.focus_set)
+        # 改行を入れ、メインスレッドで入力欄と設定操作を復活させます。
+        chat_area.after(0, append_chat_text, "\n")
+        chat_area.after(0, finish_response_ui)
 
 
 # =========================
 # GUI構築
 # =========================
 root = tk.Tk()
-root.title("すいっとトーク（suitto-talk）")
+root.title("綴り談話室")
 root.minsize(750, 450)
 
 root.grid_rowconfigure(0, weight=1)
@@ -1229,6 +1493,25 @@ voice_check = tk.Checkbutton(
 )
 voice_check.grid(row=1, column=0, columnspan=2, pady=(5, 0), sticky="w")
 
+# AIアバター表示 ON/OFF
+# OFFのときは画像だけでなく表示枠も収納し、チャット欄を広く使います。
+avatar_visible_var = tk.BooleanVar(
+    value=USER_SETTINGS["show_ai_avatar"],
+)
+avatar_visibility_check = tk.Checkbutton(
+    settings_frame,
+    text="AIアバターを表示する",
+    variable=avatar_visible_var,
+    command=apply_avatar_visibility,
+)
+avatar_visibility_check.grid(
+    row=1,
+    column=5,
+    padx=(15, 0),
+    pady=(5, 0),
+    sticky="w",
+)
+
 # VOICEVOX 話者ID
 # 別の声をデフォルトにしたい場合はここを変更します。
 speaker_var = tk.StringVar(value=str(DEFAULT_SPEAKER_ID))
@@ -1253,9 +1536,62 @@ stop_voice_button = tk.Button(
 )
 stop_voice_button.grid(row=1, column=4, padx=(5, 0), pady=(5, 0), sticky="w")
 
+# =========================
+# 会話表示エリア
+# =========================
+# 既存のチャット欄を左、固定アバターを右へ置きます。
+# チャット欄がウィンドウ拡大時の領域を優先して受け取るため、従来の使い勝手を保ちます。
+conversation_frame = tk.Frame(main_frame)
+conversation_frame.grid(row=1, column=0, sticky="nsew", padx=10, pady=10)
+conversation_frame.grid_rowconfigure(0, weight=1)
+conversation_frame.grid_columnconfigure(0, weight=1)
+
 # チャットエリア
-chat_area = scrolledtext.ScrolledText(main_frame, wrap=tk.WORD)
-chat_area.grid(row=1, column=0, sticky="nsew", padx=10, pady=10)
+# 表示専用欄として常に無効化し、ユーザーによる入力・貼り付けを防ぎます。
+# アプリから文章を更新するときは、下の専用関数内でだけ一時的に有効化します。
+chat_area = scrolledtext.ScrolledText(
+    conversation_frame,
+    wrap=tk.WORD,
+    state=tk.DISABLED
+)
+chat_area.grid(row=0, column=0, sticky="nsew")
+
+
+def append_chat_text(text):
+    """編集不可のチャット表示欄へ、アプリ側から文章を追記する。"""
+    chat_area.config(state=tk.NORMAL)
+    try:
+        chat_area.insert(tk.END, text)
+        chat_area.see(tk.END)
+    finally:
+        # 例外が起きても、ユーザーが編集できる状態を残さないようにします。
+        chat_area.config(state=tk.DISABLED)
+
+
+def replace_chat_text(text):
+    """編集不可のチャット表示欄を消去し、指定した文章へ置き換える。"""
+    chat_area.config(state=tk.NORMAL)
+    try:
+        chat_area.delete("1.0", tk.END)
+        chat_area.insert(tk.END, text)
+        chat_area.see(tk.END)
+    finally:
+        chat_area.config(state=tk.DISABLED)
+
+# アバター表示エリア
+# VOICEVOXの話者IDとは連動させず、profiles.jsonのavatar_idで画像を選びます。
+avatar_frame = tk.LabelFrame(conversation_frame, text="AIアバター")
+avatar_frame.grid(row=0, column=1, sticky="n", padx=(10, 0))
+
+avatar_controller = AvatarController(
+    avatar_frame,
+    avatars_dir=AVATARS_DIR,
+    avatar_id=AI_PROFILES[selected_name]["avatar_id"],
+    image_size=180,
+)
+
+# 保存済み設定がOFFなら、起動時からアバター枠を表示しません。
+apply_avatar_visibility(save_setting=False)
 
 # 入力エリア
 input_frame = tk.Frame(main_frame)
@@ -1280,8 +1616,47 @@ clear_button.grid(row=0, column=2, padx=(5, 0))
 save_button = tk.Button(input_frame, text="保存", command=save_chat_log)
 save_button.grid(row=0, column=3, padx=(5, 0))
 
+
+def set_response_controls_enabled(enabled):
+    """AI返答中に変更すると混線する設定・操作の有効状態をまとめて切り替える。"""
+    combo_state = "readonly" if enabled else tk.DISABLED
+    button_state = tk.NORMAL if enabled else tk.DISABLED
+
+    profile_combo.config(state=combo_state)
+    model_combo.config(state=combo_state)
+    refresh_button.config(state=button_state)
+    think_check.config(state=button_state)
+    voice_check.config(state=button_state)
+    speaker_entry.config(state=button_state)
+    clear_button.config(state=button_state)
+    save_button.config(state=button_state)
+
+
+def finish_response_ui():
+    """AI返答の終了後に、入力欄と設定操作を安全に復活させる。"""
+    global response_in_progress
+
+    response_in_progress = False
+    send_button.config(state=tk.NORMAL)
+    entry.config(state=tk.NORMAL)
+    set_response_controls_enabled(True)
+    entry.focus_set()
+
+
+def show_profile_load_warning():
+    """profiles.json の読込失敗を、GUI起動後に分かりやすく通知する。"""
+    if PROFILE_LOAD_WARNING:
+        messagebox.showwarning(
+            "profiles.json 読み込みエラー",
+            PROFILE_LOAD_WARNING,
+            parent=root,
+        )
+
+
 def on_closing():
     """ウィンドウを閉じるとき、音声再生を止めてキャッシュを掃除してから終了する。"""
+    USER_SETTINGS["show_ai_avatar"] = bool(avatar_visible_var.get())
+    save_user_settings(USER_SETTINGS_PATH, USER_SETTINGS)
     stop_voice_playback(show_message=False, cleanup_cache=True)
     cleanup_voice_cache()
     root.destroy()
@@ -1289,5 +1664,9 @@ def on_closing():
 
 root.bind("<Return>", lambda event: send_message())
 root.protocol("WM_DELETE_WINDOW", on_closing)
+
+# profiles.json に問題があってもウィンドウを先に起動し、修正方法を案内します。
+if PROFILE_LOAD_WARNING:
+    root.after(100, show_profile_load_warning)
 
 root.mainloop()
