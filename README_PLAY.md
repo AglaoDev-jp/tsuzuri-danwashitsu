@@ -675,7 +675,7 @@ Licensed under CC BY 4.0
 
 * [Ollama](https://ollama.com/)
 * [VOICEVOX](https://voicevox.hiroshiba.jp/)
-* [ACE-Step 1.5](https://github.com/ace-step/ACE-Step-1.5)
+
 
 VOICEVOXで生成した音声を利用する場合は、VOICEVOX本体および使用するキャラクター（話者）の利用規約・ライセンスをご確認ください。  
 
